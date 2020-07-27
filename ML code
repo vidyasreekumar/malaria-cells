@@ -1,0 +1,209 @@
+!pip install kaggle
+
+from google.colab import files
+files.upload()
+
+!mkdir -p ~/.kaggle
+!cp kaggle.json ~/.kaggle/
+!chmod 600 ~/.kaggle/kaggle.json
+
+!kaggle datasets download -d iarunava/cell-images-for-detecting-malaria
+
+! unzip '/content/cell-images-for-detecting-malaria.zip'
+
+! rm '/content/cell_images/Parasitized/Thumbs.db'
+! rm '/content/cell_images/Uninfected/Thumbs.db'
+
+import os
+from PIL import Image
+import random
+from shutil import copyfile
+
+list_images_P = os.listdir('/content/cell_images/Parasitized')
+list_images_U = os.listdir('/content/cell_images/Uninfected')
+random.shuffle(list_images_P)
+random.shuffle(list_images_U)
+
+os.makedirs('project')
+os.makedirs('/content/project/Train')
+os.makedirs('/content/project/Test')
+os.makedirs('/content/project/Validation')
+os.makedirs('/content/project/Train/parasitized_train')
+os.makedirs('/content/project/Train/uninfected_train')
+os.makedirs('/content/project/Validation/parasitized_validate')
+os.makedirs('/content/project/Validation/uninfected_validate')
+os.makedirs('/content/project/Test/parasitized_test')
+os.makedirs('/content/project/Test/uninfected_test')
+
+split_1 = int(0.7 * len(list_images_P))
+split_2 = int(0.8 * len(list_images_P))
+split_3 = int(0.7 * len(list_images_U))
+split_4 = int(0.8 * len(list_images_U))
+
+train_images_P = list_images_P[:split_1]
+val_images_P = list_images_P[split_1:split_2]
+test_images_P = list_images_P[split_2:]
+
+train_images_U = list_images_U[:split_3]
+val_images_U = list_images_U[split_3:split_4]
+test_images_U = list_images_U[split_4:]
+
+# COPY FILES TO PARASITIZED_TRAIN
+for filename in train_images_P:
+  src='/content/cell_images/Parasitized/'+filename
+  dst='/content/project/Train/parasitized_train/'+filename
+  copyfile(src,dst)
+  
+  # COPY FILE TO UNINFECTED_TRAIN
+for filename in train_images_U:
+  src='/content/cell_images/Uninfected/'+filename
+  dst='/content/project/Train/uninfected_train/'+filename
+  copyfile(src,dst)
+  
+  # COPY FILES TO PARASITIZED_VALIDATION
+for filename in val_images_P:
+  src='/content/cell_images/Parasitized/'+filename
+  dst='/content/project/Validation/parasitized_validate/'+filename
+  copyfile(src,dst)
+  
+  # COPY FILES TO UNINFECTED_VALIDATION
+for filename in val_images_U:
+  src='/content/cell_images/Uninfected/'+filename
+  dst='/content/project/Validation/uninfected_validate/'+filename
+  copyfile(src,dst)
+  
+  # COPY FILES TO PARASITIZED_TEST
+for filename in test_images_P:
+  src='/content/cell_images/Parasitized/'+filename
+  dst='/content/project/Test/parasitized_test/'+filename
+  copyfile(src,dst)
+  
+  # COPY FILES TO UNINFECTED_TEST
+for filename in test_images_U:
+  src='/content/cell_images/Uninfected/'+filename
+  dst='/content/project/Test/uninfected_test/'+filename
+  copyfile(src,dst)
+  
+import keras
+from keras.models import Sequential
+from keras.layers import Conv2D
+from keras.layers import MaxPooling2D
+from keras.layers import Flatten
+from keras.layers import Dense
+
+#initialise CNN
+classifier = Sequential()
+# step 1: Convolution layer
+classifier.add(Conv2D(32, (3,3), input_shape = (50,50,3), activation = 'relu'))
+# step 2: pooling layer
+classifier.add(MaxPooling2D(pool_size = (2,2)))
+# step 3: convolution layer
+classifier.add(Conv2D(32, (3,3), activation = 'relu'))
+#step 4: convolution layer
+classifier.add(Conv2D(32, (3,3), activation = 'relu'))
+# step 5: pooling layer
+classifier.add(MaxPooling2D(pool_size = (2,2)))
+#step 6: flatten layer
+classifier.add(Flatten())
+# step 7: ANN
+classifier.add(Dense(activation = 'relu', units = 128))
+classifier.add(Dense(activation = 'sigmoid', units = 1))
+# step 8: compile CNN
+classifier.compile(optimizer = 'adam', loss = 'binary_crossentropy', metrics = ['accuracy'])
+
+classifier.summary()
+classifier.load_weights('/content/drive/My Drive/Training Model/Malaria_latest120.h5')
+
+from keras.preprocessing.image import ImageDataGenerator
+train_datagen = ImageDataGenerator(
+             rescale = 1/255,
+             shear_range = 0.2,
+             zoom_range = 0.2,
+             horizontal_flip = True,
+             vertical_flip = True)
+             
+test_datagen = ImageDataGenerator(rescale = 1/255)
+batchSize = 120
+training_set = train_datagen.flow_from_directory(
+             '/content/project/Train',
+             target_size = (50,50),
+             batch_size = batchSize,
+             class_mode = 'binary')
+training_set.class_indices
+validate_set = test_datagen.flow_from_directory(
+             '/content/project/Validation',
+             target_size = (50,50),
+             batch_size = batchSize,
+             class_mode = 'binary')
+no_of_steps_per_epoch_training = int(9645/batchSize)
+no_of_steps_per_epoch_validating = int(1377/batchSize)
+print(no_of_steps_per_epoch_training)
+print(no_of_steps_per_epoch_validating)
+history = classifier.fit_generator(
+              training_set,
+              steps_per_epoch = no_of_steps_per_epoch_training,
+              epochs = 7,
+              validation_data = validate_set,
+              validation_steps = no_of_steps_per_epoch_validating
+              )
+              
+test_datagen_1 = ImageDataGenerator(rescale = 1/255)
+test_generator = test_datagen_1.flow_from_directory(
+    directory='/content/project/Test',
+    target_size=(50, 50),
+    batch_size=batchSize,
+    class_mode='binary'
+)
+no_of_steps_per_epoch_testing = 2755/batchSize
+classifier.evaluate_generator(generator=test_generator,steps = no_of_steps_per_epoch_testing)
+from google.colab import drive
+drive.mount('/content/drive')
+classifier.save('/content/drive/My Drive/Training Model/Malaria_latest120.h5')
+
+import cv2
+import numpy as np
+from keras.preprocessing import image
+
+resized=image.load_img('/content/cell_images/Parasitized/C100P61ThinF_IMG_20150918_144104_cell_163.png',target_size=(50,50))
+resized = image.img_to_array(resized)
+resized = np.expand_dims(resized, axis = 0)
+   
+result = classifier.predict(resized)
+print(result)
+if result == [[0.]]:
+  print("\nParasitized")
+if result == [[1.]]:
+  print("\nUninfected")
+
+print("Actual: Paratisized")
+
+count=0
+for i in os.listdir('/content/project/Test/uninfected_test'):
+    print(i)
+    resized=image.load_img('/content/project/Test/uninfected_test/'+i,target_size=(50,50)) 
+    resized = image.img_to_array(resized)
+    resized = np.expand_dims(resized, axis = 0)
+    result = classifier.predict(resized)
+
+print('\n\n',result)
+if result == [[0.]]:
+    print("\nParasitized")
+if result == [[1.]]:
+    print("\nUninfected")
+
+import matplotlib.pyplot as plt
+plt.plot(history.history['acc'])
+plt.plot(history.history['val_acc'])
+plt.title('model accuracy')
+plt.ylabel('accuracy')
+plt.xlabel('epoch')
+plt.legend(['train', 'test'], loc='upper left')
+plt.show()
+
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+plt.title('model loss')
+plt.ylabel('loss')
+plt.xlabel('epoch')
+plt.legend(['train', 'test'], loc='upper left')
+plt.show()
